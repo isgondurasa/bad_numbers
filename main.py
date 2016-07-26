@@ -3,12 +3,11 @@ import json
 import tarfile
 import settings
 
-from dnis import DnisStatistics
-
-from collections import defaultdict
 from datetime import datetime
 from dateutil.parser import parse as date_parse
 from dateutil.relativedelta import *
+
+from collections import defaultdict
 
 
 __all__ = ("GetAni", "GetDNIS", "GetPotentialBadANI", "GetPotentialBadDNIS")
@@ -22,7 +21,7 @@ def _extract_stream(bytestream):
     for line in bytestream:
         yield line
 
-def dump_tmp(filename, data):
+def _dump_tmp(filename, data):
     with open(filename, "w") as out:
         r = {}
         for k, v in data.items():
@@ -51,59 +50,6 @@ def _extract_multiple_data(line):
     if dump.get('status', None) and dump["status"] in settings.UNBLOCK_CODES:
         dump["connection_date"] = line[3]
     return dump
-
-def process_file(filename, time_range=None):
-    if not filename:
-        raise Exception("File not found")
-    
-    phones = {}
-
-    cur_file = None
-    
-    for tarfile, f_info in _extract_tar(filename):
-
-        if cur_file != f_info.name:
-            cur_file = f_info.name
-            print(cur_file)
-
-        if time_range:
-            t_start, t_end = time_range
-            if t_start != t_end:
-                 if not int(t_start) <= int(f_info.name.split("/")[1]) <= int(t_end):
-                     continue
-             
-        f = tarfile.extractfile(f_info)
-        
-        lines = (line for line in _extract_data(f)
-        )
-        frames = []
-        for line in lines:
-            _line = _extract_multiple_data(line)                
-            # call_info = {k:v for k,v in _line}
-
-            def is_good_call(call):
-                if call["duration"] and call["duration"] != "0":
-                    return True
-                
-                return bool(call["status"] not in ["487", "402"] and
-                            int(call["pdd"]) > 500)
-                
-            _line["failed"] = not is_good_call(_line)
-            frames.append(_line)
-        return frames
-
-def get_dnis_stats(calls):
-    def make_output(line):
-        keys = ("dnis", "attempt", "non_zero", "busy", "has_ring", "failed")
-        return [line.get(k, False) for k in keys]
-    return list(map(make_output, calls))
-
-
-def get_ani_stats(calls):
-    def make_output(line):
-        keys = ("phone_num", "attempt", "non_zero", "busy", "has_ring", "failed")
-        return [line.get(k, False) for k in keys]
-    return list(map(make_output, calls))
 
 
 def __group_by_term(term, calls):
@@ -135,6 +81,55 @@ def __get_file_names(start_dt, end_dt=None):
     time_tuple = __get_time_range(start_dt, end_dt)
     
     return [d.strftime("%Y-%m-%d") for d in dates], time_tuple
+
+
+def process_file(filename, time_range=None):
+    if not filename:
+        raise Exception("File not found")
+    
+    cur_file = None    
+    for tarfile, f_info in _extract_tar(filename):
+
+        if cur_file != f_info.name:
+            cur_file = f_info.name
+            print(cur_file)
+
+        if time_range:
+            t_start, t_end = time_range
+            if t_start != t_end:
+                 if not int(t_start) <= int(f_info.name.split("/")[1]) <= int(t_end):
+                     continue
+             
+        f = tarfile.extractfile(f_info)
+        lines = (line for line in _extract_data(f))
+        frames = []
+        for line in lines:
+            _line = _extract_multiple_data(line)              
+            # call_info = {k:v for k,v in _line}
+
+            def is_good_call(call):
+                if call["duration"] and call["duration"] != "0":
+                    return True
+                
+                return bool(call["status"] not in ["487", "402"] and
+                            int(call["pdd"]) > 500)
+                
+            _line["failed"] = not is_good_call(_line)
+            frames.append(_line)
+    return frames
+
+def get_dnis_stats(calls):
+    def make_output(line):
+        keys = ("dnis", "attempt", "non_zero", "busy", "has_ring", "failed")
+        return [line.get(k, False) for k in keys]
+    return list(map(make_output, calls))
+
+
+def get_ani_stats(calls):
+    def make_output(line):
+        keys = ("phone_num", "attempt", "non_zero", "busy", "has_ring", "failed")
+        return [line.get(k, False) for k in keys]
+    return list(map(make_output, calls))
 
 
 def GetAni(start_time, end_time, min_attempt, min_succ_percent, max_succ_percent):
