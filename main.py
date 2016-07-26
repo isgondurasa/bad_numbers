@@ -13,6 +13,7 @@ from dateutil.relativedelta import *
 
 __all__ = ("GetAni", "GetDNIS", "GetPotentialBadANI", "GetPotentialBadDNIS")
 
+
 def _extract_data(f):
     for line in f:
         yield line
@@ -34,9 +35,6 @@ def _extract_tar(filename):
         if ".cdr" in t_info.name:
             yield tar, t_info
 
-def _extract_phonenum(line):
-    line  = line.decode("utf-8").split("?")
-    return line[49] #TODO (asvir): change if needed, don't sure about this number either
 
 def _extract_multiple_data(line):
     line = line.decode("utf-8").split("?")
@@ -57,8 +55,6 @@ def _extract_multiple_data(line):
 def process_file(filename, time_range=None):
     if not filename:
         raise Exception("File not found")
-
-
     
     phones = {}
 
@@ -166,7 +162,6 @@ def GetDNIS(start_time, end_time, min_attempt, min_succ_percent, max_succ_percen
     return dnis
 
 
-
 def GetPotentialBadANI(date):
     file_names, _  = __get_file_names(date)
 
@@ -203,12 +198,14 @@ def GetPotentialBadANI(date):
             bad.add(ani)
     return list(bad)
 
-        
-    
+   
 def GetPotentialBadDNIS(date):
-    pass
+    return []
 
 if __name__ == "__main__":
-    #  frames = GetAni("2016-06-26 0:00:00", "2016-06-27 1:00:00", 0, 60, 100)
+    # tests
+    frames = GetAni("2016-06-26 0:00:00", "2016-06-27 1:00:00", 0, 60, 100)
+    print(frames)
+
     frames = GetPotentialBadANI("2016-06-26")
     print (frames)

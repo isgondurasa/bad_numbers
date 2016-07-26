@@ -5,7 +5,7 @@ DEBUG = True
 
 APP_ROOT = abspath(dirname(__file__))
 
-CDR_SERVICE_HOSTS = ("138.201.126.113", )
+CDR_SERVICE_HOSTS = ("localhost", )
 CDR_SOURCE_FOLDER = "/storage/switch_backups"
 
 FILES = ("tar.bz2", "tar.gz")
