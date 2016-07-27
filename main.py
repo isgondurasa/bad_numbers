@@ -210,13 +210,11 @@ async def add_dnis(frames):
 
 async def go():
 
-    # filenames = []
-    # for host in settings.CDR_SERVICE_HOSTS:
-    #     filenames.extend(scp_target_file(host))
+    filenames = []
+    for host in settings.CDR_SERVICE_HOSTS:
+        filenames.extend(scp_target_file(host))
 
-
-
-    for filename in ["0_2016-07-26.tar.bz2", "1_2016-07-26.tar.bz2"]:
+    for filename in filenames:
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
         frames = await process_file(file_path)
 
