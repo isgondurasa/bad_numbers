@@ -1,17 +1,20 @@
 import os
-from os.path import abspath, dirname
+from os.path import abspath, dirname, join
 
-DEBUG = True
-
+DEBUG = False
 
 PORT = "9090"
 
 APP_ROOT = abspath(dirname(__file__))
 
-CDR_SERVICE_HOSTS = ("localhost", )
+CDR_SERVICE_HOSTS = ("138.201.126.113", )
+USERNAME = "andrey"
+PASSWORD = "6hfv6EEW"
 CDR_SOURCE_FOLDER = "/storage/switch_backups"
 
-FILES = ("tar.bz2", "tar.gz")
+LOCAL_FILE_FOLDER = join(APP_ROOT, "tmp")
+
+FILES = ("tar.bz2", "tar.gz", "")
 
 if DEBUG:
     CDR_SERVICE_HOSTS = ("localhost",)
@@ -26,6 +29,6 @@ UNBLOCK_DAY_RANGE = 10  # unblock when number is blocked over 10 days
 DB_CONNECTION = {
     "user": "postgres",
     "password": "mysecretpassword",
-    "host": "192.168.99.100",
+    "host": "185.143.173.48",
     "database": "bad_numbers"
 }

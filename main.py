@@ -1,5 +1,7 @@
 import os
 import json
+import shutil
+
 import tarfile
 
 import asyncio
@@ -14,7 +16,28 @@ from collections import defaultdict
 
 from models import *
 
-__all__ = ("GetAni", "GetDNIS", "GetPotentialBadANI", "GetPotentialBadDNIS")
+import paramiko
+
+
+def scp_target_file(host):
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(host,
+                username=settings.USERNAME,
+                password=settings.PASSWORD)
+    raw_cmd = 'find {} -name "2016-07-26.tar.bz2" -o -name "*.log"'.format(settings.CDR_SOURCE_FOLDER)
+    stdin, stdout, stderr = ssh.exec_command(raw_cmd)
+    file_list = stdout.read().splitlines()
+
+    ftp = ssh.open_sftp()
+    filenames = []
+    for index, f_ in enumerate(file_list):
+        _, filename = os.path.split(f_)
+        ftp.get(f_.decode("utf-8"),
+                os.path.join(settings.LOCAL_FILE_FOLDER,
+                str(index)+"_"+filename.decode("utf-8")))
+        filenames.append(filename)
+    return filenames
 
 
 def _extract_data(f):
@@ -186,9 +209,22 @@ async def add_dnis(frames):
 
 
 async def go():
-    filename = "2016-06-26.tar.bz2"
-    filepath = os.path.join(settings.CDR_SOURCE_FOLDER, filename)
-    frames = await process_file(filepath)
+
+    # filenames = []
+    # for host in settings.CDR_SERVICE_HOSTS:
+    #     filenames.extend(scp_target_file(host))
+
+
+
+    for filename in ["0_2016-07-26.tar.bz2", "1_2016-07-26.tar.bz2"]:
+        file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
+        frames = await process_file(file_path)
+
+        try:
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+        except Exception as e:
+            print(e)
 
 
 loop = asyncio.get_event_loop()
