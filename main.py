@@ -51,11 +51,16 @@ def _extract_multiple_data(line):
         "duration": float(line[50]),
         "pdd": line[51],
         "call_id": line[1],
-        "ring_time": line[52]
+        "ring_time": line[52],
+        "busy": True if "USER_BUSY" in line[-1] else False
     }
 
     if dump.get('status', None) and dump["status"] in settings.UNBLOCK_CODES:
         dump["connection_date"] = line[3]
+
+    dump['time'] = datetime.fromtimestamp(float(str(line[3][:10])),
+                                          timezone.utc)
+
     return dump
 
 
@@ -162,6 +167,7 @@ async def add_frames(frames):
         return True
 
 async def add_calls(frames):
+    print("add calls for %d frames" % len(frames))
     engine = await _get_engine()
     async with engine.acquire() as conn:
         for frame in frames:
@@ -169,7 +175,11 @@ async def add_calls(frames):
                                                      dnis=frame["dnis"],
                                                      ani=frame["phone_num"],
                                                      duration=frame["duration"],
-                                                     non_zero=not frame["failed"]))
+                                                     ring_time=frame.get("ring_time", 0),
+                                                     non_zero=not frame["failed"],
+                                                     time=frame["time"],
+                                                     busy=frame["busy"],
+                                                     failed=frame["failed"]))
 
 async def add_dnis(frames):
     pass

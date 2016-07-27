@@ -40,7 +40,8 @@ Calls = Table("calls",
               Column('num_valid_egress', sa.Integer),
               Column("duration", sa.Integer),
               Column("busy", sa.Boolean),
-              Column("ring_time", sa.Integer))
+              Column("ring_time", sa.Integer),
+              Column("failed", sa.Boolean))
 
 
 #await conn.execute(tbl.insert().values(val='abc'))
