@@ -6,7 +6,7 @@ import asyncio
 from aiopg.sa import create_engine
 import settings
 
-from datetime import datetime
+from datetime import datetime, timezone
 from dateutil.parser import parse as date_parse
 from dateutil.relativedelta import *
 
@@ -137,22 +137,39 @@ async def _get_engine():
 
 async def add_frames(frames):
     print("add statistics for %d frames" % len(frames))
-
     engine = await _get_engine()
     async with engine.acquire() as conn:
 
-
-        import ipdb; ipdb.set_trace()
-
-        print(frame[0])
         for frame in frames:
-            print(f)
 
+            val = dict(dnis=frame["dnis"])
+            if frame.get("status", None):
+                if frame.get("status") in ("200", "503", "486", "487", "402", "480"):
+                    val["code_%s" % frame.get("status")] = True
+                else:
+                    if frame.get("status")[0] == "4":
+                        val["code_other_4xx"] = True
+                    elif frame.get("status")[0] == "5":
+                        val["code_other_5xx"] = True
+
+            connection_date = frame.get("connection_date", None)
+            if connection_date:
+                val["last_connect_on"] = datetime.fromtimestamp(float(str(connection_date[:10])),
+                                                                timezone.utc)
+
+            await conn.execute(Statistics.insert().values(**val))
 
         return True
 
 async def add_calls(frames):
-    pass
+    engine = await _get_engine()
+    async with engine.acquire() as conn:
+        for frame in frames:
+            await conn.execute(Calls.insert().values(call_id=frame["call_id"],
+                                                     dnis=frame["dnis"],
+                                                     ani=frame["phone_num"],
+                                                     duration=frame["duration"],
+                                                     non_zero=not frame["failed"]))
 
 async def add_dnis(frames):
     pass
