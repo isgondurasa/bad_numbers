@@ -20,3 +20,9 @@ UNBLOCK_CODES = ["200", "486"]  # have to be str
 UNBLOCK_RING_TIME = 0  
 UNBLOCK_DAY_RANGE = 10  # unblock when number is blocked over 10 days 
 
+DB_CONNECTION = {
+    "user": "test",
+    "password": "test",
+    "host": "192.168.99.100",
+    "database": "bad_numbers"
+}
