@@ -29,14 +29,14 @@ UNBLOCK_DAY_RANGE = 10  # unblock when number is blocked over 10 days
 DB_CONNECTION = {
     "user": "postgres",
     "password": "mysecretpassword",
-    "host": "192.168.99.100",#"185.143.173.48",
+    "host": "192.168.99.100", #"185.143.173.48", #138.201.126.113
     "database": "bad_numbers"
 }
 
-DB_CONNECTION = {
-    "user": "user_bad_numbers",
-    "password": "QAZxsw321",
-    "host": "209.126.127.64",
-    "database": "bad_numbers"
-}
+# DB_CONNECTION = {
+#     "user": "user_bad_numbers",
+#     "password": "QAZxsw321",
+#     "host": "209.126.127.64",
+#     "database": "bad_numbers"
+# }
 

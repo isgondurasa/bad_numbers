@@ -1,16 +1,21 @@
 import os
 import json
 import shutil
-
-import tarfile
-
 import asyncio
-from aiopg.sa import create_engine
+import tarfile
+import paramiko
 import settings
 
+import logging
+
+from aiopg.sa import create_engine
+
 from datetime import datetime, timezone
+
 from dateutil.parser import parse as date_parse
 from dateutil.relativedelta import *
+
+from concurrent.futures import ProcessPoolExecutor
 
 from sqlalchemy import select, join
 
@@ -18,10 +23,19 @@ from collections import defaultdict
 
 from models import *
 
-import paramiko
+
+# set up logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s:%(name)s %(levelname)s:%(message)s")
+
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+ch.setFormatter(formatter)
+logger.addHandler(ch)
 
 
-def scp_target_file(host):
+def scp_target_file(host, template=None):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host,
@@ -35,11 +49,13 @@ def scp_target_file(host):
     filenames = []
     for index, f_ in enumerate(file_list):
         _, filename = os.path.split(f_)
+        filename = filename.decode("utf-8")
+        logger.info("find file %s" % filename)
+        f_name = "{}_{}".format(index, filename)
         ftp.get(f_.decode("utf-8"),
                 os.path.join(settings.LOCAL_FILE_FOLDER,
-                str(index)+"_"+filename.decode("utf-8")))
-        filenames.append(filename)
-    return filenames
+                f_name))
+        yield f_name
 
 
 def _extract_data(f):
@@ -71,7 +87,7 @@ def _extract_multiple_data(line):
     line = line.decode("utf-8").split("?")
     dump = {
         "phone_num": line[49],
-        "dnis": line[12],
+        "dnis": line[81],
         "status": line[7][:3] if line [7] != "NULL" else None,
         "duration": float(line[50]),
         "pdd": line[51],
@@ -156,9 +172,9 @@ async def process_file(filename):
             _line["failed"] = not is_good_call(_line)
             frames.append(_line)
 
-        #await add_frames(frames)
-        #await add_calls(frames)
-        await add_dnis(frames)
+        grouped_dnis = await add_dnis(frames)
+        await add_frames(grouped_dnis)
+        await add_calls(frames)
     return frames
 
 async def _get_engine():
@@ -166,33 +182,47 @@ async def _get_engine():
         return engine
 
 async def add_frames(frames):
-    print("add statistics for %d frames" % len(frames))
+    logger.info("add statistics for %d frames" % len(frames))
     engine = await _get_engine()
+
     async with engine.acquire() as conn:
-
-        for frame in frames:
-
-            val = dict(dnis=frame["dnis"])
-            if frame.get("status", None):
+        for dnis, frames in frames.items():
+            val = {}
+            val["dnis"] = dnis
+            for frame in frames:
                 if frame.get("status") in ("200", "503", "486", "487", "402", "480"):
                     val["code_%s" % frame.get("status")] = True
                 else:
-                    if frame.get("status")[0] == "4":
-                        val["code_other_4xx"] = True
-                    elif frame.get("status")[0] == "5":
-                        val["code_other_5xx"] = True
+                    try:
+                        if frame.get("status", None) and frame.get("status")[0] == "4":
+                            val["code_other_4xx"] = True
+                        elif frame.get("status", None) and frame.get("status")[0] == "5":
+                            val["code_other_5xx"] = True
+                    except Exception as e:
+                        logger.exception(e)
+                        print(frame)
+                        print(val)
+                connection_date = frame.get("connection_date", None)
+                if connection_date:
+                    val["last_connect_on"] = datetime.fromtimestamp(float(str(connection_date[:10])),
+                                                                    timezone.utc)
 
-            connection_date = frame.get("connection_date", None)
-            if connection_date:
-                val["last_connect_on"] = datetime.fromtimestamp(float(str(connection_date[:10])),
-                                                                timezone.utc)
-
-            await conn.execute(Statistics.insert().values(**val))
+            print(dnis)
+            fields = [Statistics.c.id]
+            result = await conn.execute(select(fields).where(Statistics.c.dnis == "0"))
+            result = [r[0] for r in result]
+            if not result:
+                await conn.execute(Statistics.insert().values(**val))
+            else:
+                await conn.execute(Statistics.update()
+                                   .where(Statistics.c.dnis ==str(dnis))
+                                   .values(**val))
 
         return True
 
+
 async def add_calls(frames):
-    print("add calls for %d frames" % len(frames))
+    logger.info("add calls for %d frames" % len(frames))
     engine = await _get_engine()
     async with engine.acquire() as conn:
         for frame in frames:
@@ -208,39 +238,59 @@ async def add_calls(frames):
 
 
 async def add_dnis(frames):
-    print("add dnis")
+
+    def __diff(l1, l2):
+        l1 = set(l1)
+        l2 = set(l2)
+        return list(l1.difference(l2))
+
+    logger.info("add dnis")
     engine = await _get_engine()
 
     dnis = __group_by_term("dnis", frames)
-    dnis_nums = set(list(dnis.keys()))
+    dnis_nums = list(dnis.keys())
 
     async with engine.acquire() as conn:
-        import ipdb; ipdb.set_trace()
-        result = await conn.execute(select(Dnis.c.dnis.in_(dnis_nums)))
-        import ipdb; ipdb.set_trace()
+        result = await conn.execute(select([Dnis.c.dnis]).where(Dnis.c.dnis.in_(dnis_nums)))
         result = [r[0] for r in result]
+        dnis_to_insert = __diff(dnis_nums, result)
+
+        for dnis_ in dnis_to_insert:
+            await conn.execute(Dnis.insert().values(dnis=dnis_,
+                                                    is_mobile=True,
+                                                    carrier="Any text"))
+
+        return dnis
+
+async def get_file(host):
+    file_path = os.path.join(settings.LOCAL_FILE_FOLDER, "0_2016-07-26.tar.bz2")
+    return await process_file(file_path)
+
+    # logger.info("search on host: %s" % host)
+    # yesterday_template = (datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
+    # for filename in scp_target_file(host, yesterday_template):
+    #     file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
+    #     if not i:
+    #         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
+    #     logger.info("got file: {}".format(file_path))
+    #     frames = await process_file(file_path)
+    #     try:
+    #         if os.path.isfile(file_path):
+    #             os.unlink(file_path)
+    #     except Exception as e:
+    #         print(e)
+    #     return frames
 
 
-async def go():
+def enable_process(host):
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(get_file(host))
+    return loop
 
-    # filenames = []
-    # for host in settings.CDR_SERVICE_HOSTS:
-    #     filenames.extend(scp_target_file(host))
-
-    filenames = ["0_2016-07-26.tar.bz2",]
-
-    for filename in filenames:
-        file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
-        frames = await process_file(file_path)
-
-        try:
-            if os.path.isfile(file_path):
-                os.unlink(file_path)
-        except Exception as e:
-            print(e)
-
-
-loop = asyncio.get_event_loop()
-loop.run_until_complete(go())
-
-
+if __name__ == "__main__":
+    logger.info("Start CDR Bad NUmbers")
+    print("Start CDR Bad NUmbers")
+    loops = []
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        for loop in executor.map(enable_process, settings.CDR_SERVICE_HOSTS):
+            loops.append(loop)
