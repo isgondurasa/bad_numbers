@@ -9,6 +9,7 @@ __all__ = ("Dnis", "Statistics", "Calls")
 Dnis = Table('dnis',
              metadata,
              Column('id', sa.Integer, primary_key=True),
+             Column('dnis', sa.String(128)),
              Column('lrm', sa.SmallInteger),
              Column("is_mobile", sa.Boolean),
              Column("carrier", sa.Text))

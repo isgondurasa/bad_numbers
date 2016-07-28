@@ -83,7 +83,8 @@ CREATE TABLE dnis (
     id integer NOT NULL,
     lrn integer,
     is_mobile boolean,
-    carrier text
+    carrier text,
+    dnis character varying(128)
 );
 
 
@@ -176,7 +177,12 @@ ALTER TABLE ONLY dnis ALTER COLUMN id SET DEFAULT nextval('dnis_id_seq'::regclas
 ALTER TABLE ONLY statistics ALTER COLUMN id SET DEFAULT nextval('statistics_id_seq'::regclass);
 
 
+--
+-- Data for Name: calls; Type: TABLE DATA; Schema: public; Owner: postgres
+--
 
+COPY calls (id, call_id, dnis, ani, "time", non_zero, num_valid_egress, duration, busy, ring_time, failed) FROM stdin;
+\.
 
 
 --
@@ -190,7 +196,7 @@ SELECT pg_catalog.setval('calls_id_seq', 1, true);
 -- Data for Name: dnis; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY dnis (id, lrn, is_mobile, carrier) FROM stdin;
+COPY dnis (id, lrn, is_mobile, carrier, dnis) FROM stdin;
 \.
 
 
@@ -199,6 +205,14 @@ COPY dnis (id, lrn, is_mobile, carrier) FROM stdin;
 --
 
 SELECT pg_catalog.setval('dnis_id_seq', 1, false);
+
+
+--
+-- Data for Name: statistics; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY statistics (id, dnis, code_200, code_404, code_503, code_486, code_487, code_402, code_480, code_other_4xx, code_other_5xx, last_connect_on, last_block_on, last_unblock_on) FROM stdin;
+\.
 
 
 --

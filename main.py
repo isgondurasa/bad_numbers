@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from dateutil.parser import parse as date_parse
 from dateutil.relativedelta import *
 
+from sqlalchemy import select, join
+
 from collections import defaultdict
 
 from models import *
@@ -154,8 +156,8 @@ async def process_file(filename):
             _line["failed"] = not is_good_call(_line)
             frames.append(_line)
 
-        await add_frames(frames)
-        await add_calls(frames)
+        #await add_frames(frames)
+        #await add_calls(frames)
         await add_dnis(frames)
     return frames
 
@@ -204,15 +206,28 @@ async def add_calls(frames):
                                                      busy=frame["busy"],
                                                      failed=frame["failed"]))
 
+
 async def add_dnis(frames):
-    pass
+    print("add dnis")
+    engine = await _get_engine()
+
+    dnis = __group_by_term("dnis", frames)
+    dnis_nums = set(list(dnis.keys()))
+
+    async with engine.acquire() as conn:
+        import ipdb; ipdb.set_trace()
+        result = await conn.execute(select(Dnis.c.dnis.in_(dnis_nums)))
+        import ipdb; ipdb.set_trace()
+        result = [r[0] for r in result]
 
 
 async def go():
 
-    filenames = []
-    for host in settings.CDR_SERVICE_HOSTS:
-        filenames.extend(scp_target_file(host))
+    # filenames = []
+    # for host in settings.CDR_SERVICE_HOSTS:
+    #     filenames.extend(scp_target_file(host))
+
+    filenames = ["0_2016-07-26.tar.bz2",]
 
     for filename in filenames:
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
