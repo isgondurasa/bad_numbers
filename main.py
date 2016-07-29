@@ -276,9 +276,6 @@ async def add_calls(frames):
                 res["busy"] = m_fr["busy"]
                 res["duration"] = res.get("duration", 0) + m_fr.get("duration", 0)
 
-                
-
-                
             grouped_terms[term] = res
 
         return grouped_terms
