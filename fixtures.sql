@@ -14,14 +14,14 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- Name: plpgsql; Type: EXTENSION; Schema: -; Owner:
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: 
 --
 
 CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
 
 
 --
--- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner:
+-- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner: 
 --
 
 COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
@@ -41,8 +41,8 @@ CREATE TABLE calls (
     id integer NOT NULL,
     call_id character varying(128),
     dnis character varying(128),
-    ani text,
-    "time" timestamp without time zone,,
+    ani character varying(128),
+    "time" text,
     non_zero boolean DEFAULT false,
     num_valid_egress integer,
     duration integer DEFAULT 0,
@@ -128,7 +128,7 @@ CREATE TABLE statistics (
     code_480 integer,
     code_other_4xx integer,
     code_other_5xx integer,
-    "date" timestamp without time zone,
+    date timestamp without time zone,
     last_block_on timestamp without time zone,
     last_unblock_on timestamp without time zone
 );
@@ -190,7 +190,7 @@ COPY calls (id, call_id, dnis, ani, "time", non_zero, num_valid_egress, duration
 -- Name: calls_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('calls_id_seq', 1, true);
+SELECT pg_catalog.setval('calls_id_seq', 77759, true);
 
 
 --
@@ -205,14 +205,14 @@ COPY dnis (id, lrn, is_mobile, carrier, dnis) FROM stdin;
 -- Name: dnis_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('dnis_id_seq', 1, false);
+SELECT pg_catalog.setval('dnis_id_seq', 80339, true);
 
 
 --
 -- Data for Name: statistics; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY statistics (id, dnis, code_200, code_404, code_503, code_486, code_487, code_402, code_480, code_other_4xx, code_other_5xx, last_connect_on, last_block_on, last_unblock_on) FROM stdin;
+COPY statistics (id, ip, dnis, code_200, code_404, code_503, code_486, code_487, code_402, code_480, code_other_4xx, code_other_5xx, date, last_block_on, last_unblock_on) FROM stdin;
 \.
 
 
@@ -220,7 +220,7 @@ COPY statistics (id, dnis, code_200, code_404, code_503, code_486, code_487, cod
 -- Name: statistics_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('statistics_id_seq', 1, true);
+SELECT pg_catalog.setval('statistics_id_seq', 79795, true);
 
 
 --

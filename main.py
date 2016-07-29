@@ -100,9 +100,6 @@ def _extract_multiple_data(line):
         "busy": True if "USER_BUSY" in line[-1] else False
     }
 
-    if dump.get('status', None) and dump["status"] in settings.UNBLOCK_CODES:
-        dump["connection_date"] = line[3]
-
     dump['time'] = datetime.fromtimestamp(float(str(line[3][:10])),
                                           timezone.utc)
 
@@ -200,7 +197,7 @@ def increase_value(frame, val):
             v =  val.get("code_other_5xx", 0)
             val["code_other_5xx"] = v + 1
     return val
-    
+
 
 async def add_statistics(frames, folder):
     """
@@ -214,15 +211,12 @@ async def add_statistics(frames, folder):
             val = dict(dnis=dnis, ip=folder)
             for frame in frames:
                 val = increase_value(frame, val)
-                connection_date = frame.get("connection_date", None)
-                if connection_date:
-                    val["date"] = datetime.fromtimestamp(float(str(connection_date[:10])),
-                                                         timezone.utc)
+                val["date"] = frame.get("time", None)
 
             fields = [Statistics.c,]
             result = await conn.execute(select(Statistics.c).where(Statistics.c.dnis == dnis))
             result = [r for r in result]
-            
+
             if result:
                 for k, v in val.items():
                     if "code" in k: ###
@@ -237,8 +231,8 @@ async def add_statistics(frames, folder):
 
             if not result:
                 await conn.execute(Statistics.insert().values(**val))
-            
-                
+
+
         return True
 
 
@@ -266,7 +260,6 @@ async def add_calls(frames):
                     res.pop("pdd")
                     res.pop("status")
                     res.pop("phone_num")
-                    res.pop("connection_date", None)
                     continue
                 res["call_id"] = m_fr["call_id"]
                 res["failed"] = m_fr["failed"]
@@ -282,7 +275,7 @@ async def add_calls(frames):
 
         return grouped_terms
 
-    
+
     logger.info("add calls for %d frames" % len(frames))
     engine = await _get_engine()
     async with engine.acquire() as conn:
@@ -301,7 +294,7 @@ async def add_calls(frames):
                                                      .values(**val))
 
                 except Exception as e:
-                    
+
                     print(str(e))
 
             else:
@@ -361,7 +354,7 @@ def enable_process(host):
     return loop
 
 if __name__ == "__main__":
-    logger.info("Start CDR Bad NUmbers")
+    logger.info("Start CDR Bad Numbers")
     print("Start CDR Bad NUmbers")
     loops = []
     with ProcessPoolExecutor(max_workers=4) as executor:
