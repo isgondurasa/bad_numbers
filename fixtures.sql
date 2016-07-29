@@ -117,17 +117,18 @@ ALTER SEQUENCE dnis_id_seq OWNED BY dnis.id;
 
 CREATE TABLE statistics (
     id integer NOT NULL,
+    ip character varying(16),
     dnis character varying(128),
-    code_200 boolean,
-    code_404 boolean,
-    code_503 boolean,
-    code_486 boolean,
-    code_487 boolean,
-    code_402 boolean,
-    code_480 boolean,
-    code_other_4xx boolean,
-    code_other_5xx boolean,
-    last_connect_on timestamp without time zone,
+    code_200 integer,
+    code_404 integer,
+    code_503 integer,
+    code_486 integer,
+    code_487 integer,
+    code_402 integer,
+    code_480 integer,
+    code_other_4xx integer,
+    code_other_5xx integer,
+    date timestamp without time zone,
     last_block_on timestamp without time zone,
     last_unblock_on timestamp without time zone
 );
