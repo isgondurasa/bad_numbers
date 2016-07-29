@@ -42,7 +42,7 @@ CREATE TABLE calls (
     call_id character varying(128),
     dnis character varying(128),
     ani text,
-    "time" text,
+    "time" timestamp without time zone,,
     non_zero boolean DEFAULT false,
     num_valid_egress integer,
     duration integer DEFAULT 0,
@@ -128,7 +128,7 @@ CREATE TABLE statistics (
     code_480 integer,
     code_other_4xx integer,
     code_other_5xx integer,
-    date timestamp without time zone,
+    "date" timestamp without time zone,
     last_block_on timestamp without time zone,
     last_unblock_on timestamp without time zone
 );
