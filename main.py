@@ -41,21 +41,24 @@ def scp_target_file(host, template=None):
     ssh.connect(host,
                 username=settings.USERNAME,
                 password=settings.PASSWORD)
-    raw_cmd = 'find {} -name "2016-06-26.tar.bz2" -o -name "*.log"'.format(settings.CDR_SOURCE_FOLDER)
+    raw_cmd = 'find {} -name "2016-07-26.tar.bz2" -o -name "*.log"'.format(settings.CDR_SOURCE_FOLDER)
     stdin, stdout, stderr = ssh.exec_command(raw_cmd)
     file_list = stdout.read().splitlines()
 
     ftp = ssh.open_sftp()
     filenames = []
     for index, f_ in enumerate(file_list):
-        _, filename = os.path.split(f_)
+        dir_path, filename = os.path.split(f_)
+        dir_path = dir_path.decode("utf-8").replace(settings.CDR_SOURCE_FOLDER, "")
+        dir_path = dir_path.split(os.sep)[1]
+        print(dir_path)
         filename = filename.decode("utf-8")
         logger.info("find file %s" % filename)
         f_name = "{}_{}".format(index, filename)
         ftp.get(f_.decode("utf-8"),
                 os.path.join(settings.LOCAL_FILE_FOLDER,
                 f_name))
-        yield f_name
+        yield f_name, dir_path
 
 
 def _extract_data(f):
@@ -145,7 +148,7 @@ async def _get_engine(self):
                                  password=dsn.get('password'))
     return engine
 
-async def process_file(filename):
+async def process_file(filename, folder):
     if not filename:
         raise Exception("File not found")
 
@@ -174,7 +177,7 @@ async def process_file(filename):
             frames.append(_line)
 
         grouped_dnis = await add_dnis(frames)
-        await add_statistics(grouped_dnis)
+        await add_statistics(grouped_dnis, folder)
         await add_calls(frames)
     return frames
 
@@ -199,7 +202,7 @@ def increase_value(frame, val):
     return val
     
 
-async def add_statistics(frames):
+async def add_statistics(frames, folder):
     """
     adds/updates statistics and counts statuses
     """
@@ -208,7 +211,7 @@ async def add_statistics(frames):
 
     async with engine.acquire() as conn:
         for dnis, frames in frames.items():
-            val = dict(dnis=dnis,)
+            val = dict(dnis=dnis, ip=folder)
             for frame in frames:
                 val = increase_value(frame, val)
                 connection_date = frame.get("connection_date", None)
@@ -263,7 +266,6 @@ async def add_calls(frames):
                     res.pop("pdd")
                     res.pop("status")
                     res.pop("phone_num")
-                    print(res)
                     res.pop("connection_date", None)
                     continue
                 res["call_id"] = m_fr["call_id"]
@@ -335,16 +337,16 @@ async def add_dnis(frames):
         return dnis
 
 async def get_file(host):
-    file_path = os.path.join(settings.LOCAL_FILE_FOLDER, "0_2016-07-26.tar.bz2")
-    return await process_file(file_path)
+    #file_path = os.path.join(settings.LOCAL_FILE_FOLDER, "0_2016-07-26.tar.bz2")
+    #return await process_file(file_path)
 
     logger.info("search on host: %s" % host)
     yesterday_template = (datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
-    for filename in scp_target_file(host, yesterday_template):
+    for filename, ip_folder in scp_target_file(host, yesterday_template):
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
         logger.info("got file: {}".format(file_path))
-        frames = await process_file(file_path)
+        frames = await process_file(file_path, ip_folder)
         try:
             if os.path.isfile(file_path):
                 os.unlink(file_path)
