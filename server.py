@@ -81,40 +81,42 @@ class BadCallApiHandler(RequestHandler):
             return await method(arguments)
 
     async def GetAni(self, params):
-        import ipdb; ipdb.set_trace()
+        engine = await self._get_engine()
+        with engine,acquire() as conn:
+            pass
 
     async def GetDNIS(self, params):
-        pass
+        engine = await self._get_engine()
+        with engine,acquire() as conn:
+            pass
 
 
-    def _get_potential_bad(self, params, term):
+    async def _get_potential_bad(self, params, term):
         date = params.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
         date_start = date + ' 00:00:00'
         date_end = date + ' 23:59:59'
         engine = await self._get_engine()
         async with engine.acquire() as conn:
-            fields = (Calls.c.ani, Calls.c.non_zero, Calls.c.duration, Calls.c.busy, Calls.c.ring_time, Calls.c.failed)
+            fields = (Calls.c.ani, Calls.c. dnis, Calls.c.non_zero, Calls.c.duration, Calls.c.busy, Calls.c.ring_time, Calls.c.failed)
             result = await conn.execute(select(fields).where(and_(Calls.c.time >= date_start,
                                                                   Calls.c.time <= date_end)))
             rows = [self.__parse_result_row(row) for row in await result.fetchall()]
             grouped = self.__group_by_term(term, rows)
-            bad =  self.__check(grouped_anis)
+            bad =  self.__check(grouped)
             return bad
-        
+
     async def GetPotentialBadANI(self, params):
         result = await self._get_potential_bad(params, "ani")
         self.write(json.dumps(result))
 
     async def GetPotentialBadDNIS(self, params):
-        result = await self._get_potential_bad(params. "dnis")
-        self.write(json.dumos(result))
+        result = await self._get_potential_bad(params, "dnis")
+        self.write(json.dumps(result))
 
 def make_server():
     return tornado.web.Application([
         (r'^/api/(?P<method>\w+?)$', BadCallApiHandler, {}, 'bad_number_api'),
-    ], debug=True, reload=True)
-
-
+    ], debug=settings.DEBUG, reload=True)
 
 if __name__ == "__main__":
     tornado.platform.asyncio.AsyncIOMainLoop().install()
