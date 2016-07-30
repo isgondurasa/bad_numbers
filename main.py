@@ -349,7 +349,6 @@ def enable_process(host):
 
 if __name__ == "__main__":
     logger.info("Start CDR Bad Numbers")
-    print("Start CDR Bad NUmbers")
     loops = []
     with ProcessPoolExecutor(max_workers=4) as executor:
         for loop in executor.map(enable_process, settings.CDR_SERVICE_HOSTS):

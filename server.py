@@ -18,6 +18,16 @@ from sqlalchemy import select, join
 from datetime import datetime
 from collections import defaultdict
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s:%(name)s %(levelname)s:%(message)s")
+
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
+
 class BadCallApiHandler(RequestHandler):
 
     def __parse_result_row(self, row):
@@ -43,7 +53,6 @@ class BadCallApiHandler(RequestHandler):
 
             for call in calls:
                 measures["duration"] += float(call["duration"])
-                #measures["status"].append(call["status"])
                 measures["ring_time"] = any([measures["ring_time"],
                                              bool(call["ring_time"])])
                 if not call["failed"]:
@@ -71,36 +80,34 @@ class BadCallApiHandler(RequestHandler):
         if method:
             return await method(arguments)
 
-
     async def GetAni(self, params):
         import ipdb; ipdb.set_trace()
 
     async def GetDNIS(self, params):
         pass
 
-    async def GetPotentialBadANI(self, params):
 
+    def _get_potential_bad(self, params, term):
         date = params.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
-
         date_start = date + ' 00:00:00'
         date_end = date + ' 23:59:59'
-
         engine = await self._get_engine()
         async with engine.acquire() as conn:
             fields = (Calls.c.ani, Calls.c.non_zero, Calls.c.duration, Calls.c.busy, Calls.c.ring_time, Calls.c.failed)
             result = await conn.execute(select(fields).where(and_(Calls.c.time >= date_start,
                                                                   Calls.c.time <= date_end)))
             rows = [self.__parse_result_row(row) for row in await result.fetchall()]
-            grouped_anis = self.__group_by_term("ani", rows)
-
+            grouped = self.__group_by_term(term, rows)
             bad =  self.__check(grouped_anis)
-            self.write(json.dumps(bad))
-
+            return bad
+        
+    async def GetPotentialBadANI(self, params):
+        result = await self._get_potential_bad(params, "ani")
+        self.write(json.dumps(result))
 
     async def GetPotentialBadDNIS(self, params):
-        pass
-
-
+        result = await self._get_potential_bad(params. "dnis")
+        self.write(json.dumos(result))
 
 def make_server():
     return tornado.web.Application([
