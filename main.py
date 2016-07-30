@@ -91,7 +91,7 @@ def _extract_multiple_data(line):
     dump = {
         "ani": line[12],
         "dnis": line[49],
-        "lrn_dis": line[80],
+        "lrn_dnis": line[80],
         "status": line[7][:3] if line [7] != "NULL" else None,
         "duration": float(line[50]),
         "pdd": line[51],
@@ -137,16 +137,7 @@ def __get_file_names(start_dt, end_dt=None):
     return [d.strftime("%Y-%m-%d") for d in dates], time_tuple
 
 
-async def _get_engine(self):
-    dsn = settings.DB_CONNECTION
-    engine = await create_engine(user=dsn.get('user'),
-                                 database=dsn.get('database'),
-                                 host=dsn.get('host'),
-                                 password=dsn.get('password'))
-    return engine
-
-
-async def process_file(filename, folder=None):
+def process_file(filename, folder=None):
     if not filename:
         raise Exception("File not found")
 
@@ -176,7 +167,7 @@ async def process_file(filename, folder=None):
         yield frames
 
 
-async def create_row(frames):
+async def create_row(frames, folder=None):
     try:
         grouped_dnis = await add_dnis(frames)
         await add_statistics(grouped_dnis, folder)
@@ -188,11 +179,10 @@ async def create_row(frames):
 
 
 async def _get_engine():
-        engine = await create_engine(**settings.DB_CONNECTION)
-        return engine
+    engine = await create_engine(**settings.DB_CONNECTION)
+    return engine
 
-    
-STATUSES = ("200", "503", "486", "487", "402", "480")xs
+STATUSES = ("200", "503", "486", "487", "402", "480")
 def increase_value(frame, val):
     if frame.get("status") in STATUSES:
         stat = "code_%s" % frame.get("status")
@@ -235,7 +225,7 @@ async def add_statistics(frames, folder):
                             val[k] = getattr(result, k)
 
                 await conn.execute(Statistics.update()
-                                   .where(Statistics.c.dnis ==str(dnis))
+                                   .where(Statistics.c.dnis == str(dnis))
                                    .values(**val))
 
             if not result:
@@ -262,12 +252,7 @@ async def add_calls(frames):
             res = {}
             for m_fr in mini_frames:
                 if not res:
-                    res = m_fr
-                    res["ani"] = m_fr["ani"]
-                    res.pop("lrn_dis")
-                    res.pop("pdd")
-                    res.pop("status")
-                    res.pop("ani")
+                    res = {k: v for k, v in m_fr.items() if k not in ("lrn_dnis", "pdd", "status",)}
                     continue
                 res["call_id"] = m_fr["call_id"]
                 res["failed"] = m_fr["failed"]
@@ -283,13 +268,11 @@ async def add_calls(frames):
 
         return grouped_terms
 
-
     logger.info("add calls for %d frames" % len(frames))
+    grouped_frames = group_by(frames)
+
     engine = await _get_engine()
     async with engine.acquire() as conn:
-
-        grouped_frames = group_by(frames)
-
         for term, val in grouped_frames.items():
             dnis, ani = term.split("_")
             result = await conn.execute(select(Calls.c).where(and_(Calls.c.ani == ani,
@@ -305,6 +288,7 @@ async def add_calls(frames):
                     logger.exception(str(e))
 
             else:
+                print(val)
                 await conn.execute(Calls.insert().values(**val))
     return True
 
@@ -338,9 +322,10 @@ async def add_dnis(frames):
 
 async def get_file(host):
     if settings.DEBUG:
+        folder = "localhost"
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, "0_2016-07-26.tar.bz2")
-        for frame in  await process_file(file_path):
-            frame = await insert_row(frame)
+        for frame in process_file(file_path, folder):
+            frame = await create_row(frame, folder)
 
     logger.info("search on host: %s" % host)
     yesterday_template = (datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
