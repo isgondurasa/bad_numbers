@@ -1,7 +1,7 @@
 import os
 from os.path import abspath, dirname, join
 
-DEBUG = False
+DEBUG = True
 
 PORT = "9090"
 
