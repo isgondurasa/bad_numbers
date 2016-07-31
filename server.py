@@ -18,6 +18,9 @@ from sqlalchemy import select, join
 from datetime import datetime
 from collections import defaultdict
 
+from sqlalchemy import func
+
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter("%(asctime)s:%(name)s %(levelname)s:%(message)s")
@@ -67,6 +70,7 @@ class BadCallApiHandler(RequestHandler):
                     bad.add(ani)
         return list(bad)
 
+
     async def _get_engine(self):
         engine = await create_engine(**settings.DB_CONNECTION)
         return engine
@@ -80,16 +84,46 @@ class BadCallApiHandler(RequestHandler):
         if method:
             return await method(arguments)
 
-    async def GetAni(self, params):
+    async def GetANI(self, params):
+        """
+        GetANI( start time, end time, min attempt, min_succ_percent, max_succ_percent)
+        """
+        start_time = params.get("start_time", None)
+        if not start_time:
+            start_time = datetime.utcnow().strftime("%Y-%m-%d")
+
+        end_time = params.get("end_time", None)
+        if not end_time:
+            end_time = datetime.utcnow().strftime("%Y-%m-%d")
+
+        min_attempt = params.get("min_attempt", None)
+        min_succ_percent = params.get("min_succ_percent", None)
+        max_succ_percent = params.get("max_succ_percent", None)
+
         engine = await self._get_engine()
-        with engine,acquire() as conn:
-            pass
+        async with engine.acquire() as conn:
+            # no need to aggregate, because data is already aggregated
+            query = select(Calls.c)
+
+            if start_time:
+                query = query.where(Calls.c.time >= start_time)
+
+            if end_time:
+                query = query.where(Calls.c.time <= end_time)
+
+            if min_attempt:
+                query = query.where(Calls.c.num_valid_egress >= min_attempt)
+
+            #  TODO (aos): have to handler min/max succ percent
+            result = await conn.execute(query)
+            rows = [self.__parse_result_row(row) for row in await result.fetchall()]
+            grouped = self.__group_by_term("ani", rows)
+            self.write(json.dumps(grouped))
 
     async def GetDNIS(self, params):
         engine = await self._get_engine()
-        with engine,acquire() as conn:
+        with engine.acquire() as conn:
             pass
-
 
     async def _get_potential_bad(self, params, term):
         date = params.get("date", datetime.utcnow().strftime("%Y-%m-%d"))

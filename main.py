@@ -91,16 +91,25 @@ def _extract_multiple_data(line):
     dump = {
         "ani": line[12],
         "dnis": line[49],
-        "lrn_dnis": line[80],
+        #"lrn_dnis": line[80],
         "status": line[7][:3] if line [7] != "NULL" else None,
-        "duration": float(line[50]),
-        "pdd": line[51],
+        "duration": int(line[50]),
         "call_id": line[1],
         "ring_time": line[52],
-        "busy": True if "USER_BUSY" in line[-1] else False
+        "busy": True if "USER_BUSY" in line[-1] else False,
+        "is_final": line[99],
+        "non_zero_call": 1 if int(line[50]) > 0 else 0
     }
 
-    dump['time'] = datetime.fromtimestamp(float(str(line[3][:10])),
+    dump["total_ingress"] = 1 if bool(line[99]) else 0
+    dump["valid_ingress"] = 1 if bool(line[99]) and bool(line[68]) else 0
+
+    if line[51] and int(line[51]) > 0:
+        dump["num_call_ringtone"] = 1
+    else:
+        dump["num_call_ringtone"] = 0
+
+    dump['date'] = datetime.fromtimestamp(float(str(line[3][:10])),
                                           timezone.utc)
 
     return dump
@@ -160,7 +169,7 @@ def process_file(filename, folder=None):
                     return True
 
                 return bool(call["status"] not in ["487", "402"] and
-                            int(call["pdd"]) > 500)
+                            int(call["num_call_ringtone"]) > 500)
 
             _line["failed"] = not is_good_call(_line)
             frames.append(_line)
@@ -169,10 +178,13 @@ def process_file(filename, folder=None):
 
 async def create_row(frames, folder=None):
     try:
-        grouped_dnis = await add_dnis(frames)
-        await add_statistics(grouped_dnis, folder)
-        await add_calls(frames)
-        return grouped_dnis
+        await add_dnis_statistics(frames, folder)
+        await add_ani_statistics(frames, folder)
+
+
+        #grouped_dnis = await add_dnis(frames)
+        #await add_calls(frames)
+        #return grouped_dnis
     except Exception as e:
         logger.exception(e)
         return []
@@ -182,56 +194,99 @@ async def _get_engine():
     engine = await create_engine(**settings.DB_CONNECTION)
     return engine
 
-STATUSES = ("200", "503", "486", "487", "402", "480")
-def increase_value(frame, val):
-    if frame.get("status") in STATUSES:
-        stat = "code_%s" % frame.get("status")
-        stat_count = val.get(stat, 0)
-        val[stat] = stat_count + 1
+
+async def upsert(model, grouped_values, folder):
+        engine = await _get_engine()
+
+        def merge_rows(d1, d2, good_fields, bad_fields=[]):
+            return {**d1, **d2}
+
+        async with engine.acquire() as conn:
+            for key, aggregated_values in grouped_values.items():
+                aggregated_values["ip"] = folder
+
+                q_ = hasattr(model.c, key)
+                result = None
+                result = await conn.execute(select(model.c).where(q_ == key))
+                result = [r for r in result]
+                if result:
+                    try:
+                        val = merge_rows(aggregated_values, result[0])
+                        await conn.execute(model.update().where(q_ == key)
+                                                         .values(**val))
+                    except Exception as e:
+
+                        logger.exception(e)
+                        logger.error(val)
+                else:
+                    try:
+
+                        await conn.execute(model.insert().values(**aggregated_values))
+                    except Exception as e:
+                        logger.exception(e)
+                        print (aggregated_values)
+
+
+STATUSES = ("200", "404", "503", "486", "487", "402", "480")
+def status_code(frame):
+    status = frame.pop("status", None)
+
+    if not status:
+        return
+
+    if frame["is_final"] != "1":
+        return
+
+    if status in STATUSES:
+        return "code_%s" % status
     else:
-        if frame.get("status", None) and frame.get("status")[0] == "4":
-            v =  val.get("code_other_4xx", 0)
-            val["code_other_4xx"] = v + 1
-        elif frame.get("status", None) and frame.get("status")[0] == "5":
-            v =  val.get("code_other_5xx", 0)
-            val["code_other_5xx"] = v + 1
-    return val
+        if status and status[0] == "4":
+            return "code_other_4xx"
+        elif status and status[0] == "5":
+            return "code_other_5xx"
 
 
-async def add_statistics(frames, folder):
+def group_by(term, frames, exclude_list=[]):
+    frames = __group_by_term(term, frames)
+    grouped_by_key = {}
+
+    for key, frameset in frames.items():
+        result = {}
+        for frame in frameset:
+            if not result:
+                result = {k: v for k, v in frame.items() if k not in exclude_list and k}
+                s_code = status_code(frame)
+                if s_code and s_code != "None":
+                    result[s_code] = 1
+                continue
+
+            if s_code:
+                if s_code in result:
+                    result[s_code] += 1
+                else:
+                    result[s_code] = 1
+        grouped_by_key[key] = result
+
+    return grouped_by_key
+
+
+async def add_dnis_statistics(frames, folder=None):
     """
     adds/updates statistics and counts statuses
     """
-    logger.info("add statistics for %d frames" % len(frames))
-    engine = await _get_engine()
+    logger.info("add dnis statistics for %d frames" % len(frames))
+    dnis_exclude = ("call_id", "lrn_dnis", "status", "is_final", "ani", "failed", "busy", "ring_time")
+    return await upsert(DnisStatistics, group_by("dnis", frames, dnis_exclude), folder)
 
-    async with engine.acquire() as conn:
-        for dnis, frames in frames.items():
-            val = dict(dnis=dnis, ip=folder)
-            for frame in frames:
-                val = increase_value(frame, val)
-                val["date"] = frame.get("time", None)
-                val["date"] = val["date"].strftime("%Y-%m-%d") if val["date"] else None
 
-            result = await conn.execute(select(Statistics.c).where(Statistics.c.dnis == dnis))
-            result = [r for r in result]
+async def add_ani_statistics(frames, folder=None):
+    """
+    add statistics for ani
+    """
 
-            if result:
-                for k, v in val.items():
-                    if "code" in k: ###
-                        if val.get(k, None):
-                            val[k] = int(val[k]) + int(getattr(result, k, 0))
-                        else:
-                            val[k] = getattr(result, k)
-
-                await conn.execute(Statistics.update()
-                                   .where(Statistics.c.dnis == str(dnis))
-                                   .values(**val))
-
-            if not result:
-                await conn.execute(Statistics.insert().values(**val))
-
-        return True
+    logger.info("add ani statistics for %d frames" % len(frames))
+    ani_exclude = ("call_id", "lrn_dnis", "status", "is_final", "dnis", "failed", "busy", "ring_time")
+    return await upsert(AniStatistics, group_by("ani", frames, ani_exclude), folder)
 
 
 async def add_calls(frames):
@@ -252,7 +307,7 @@ async def add_calls(frames):
             res = {}
             for m_fr in mini_frames:
                 if not res:
-                    res = {k: v for k, v in m_fr.items() if k not in ("lrn_dnis", "pdd", "status",)}
+                    res = {k: v for k, v in m_fr.items() if k not in ("lrn_dnis", "num_call_ringtone", "status",)}
                     continue
                 res["call_id"] = m_fr["call_id"]
                 res["failed"] = m_fr["failed"]
@@ -288,7 +343,6 @@ async def add_calls(frames):
                     logger.exception(str(e))
 
             else:
-                print(val)
                 await conn.execute(Calls.insert().values(**val))
     return True
 
@@ -333,13 +387,15 @@ async def get_file(host):
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
         logger.info("got file: {}".format(file_path))
-        frames = await process_file(file_path, ip_folder)
+        for frame in process_file(file_path, ip_folder):
+            frame = await create_row(frame, folder)
         try:
             if os.path.isfile(file_path):
                 os.unlink(file_path)
         except Exception as e:
             print(e)
         return frames
+
 
 
 def enable_process(host):
