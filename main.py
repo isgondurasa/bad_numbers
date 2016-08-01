@@ -155,7 +155,7 @@ def process_file(filename, folder=None):
 
         if cur_file != f_info.name:
             cur_file = f_info.name
-            print(cur_file)
+            logger.info("Parsing: %s" % cur_file)
 
         f = tarfile.extractfile(f_info)
         lines = (line for line in _extract_data(f))
@@ -195,32 +195,36 @@ async def _get_engine():
     return engine
 
 
-async def upsert(model, grouped_values, folder):
+async def upsert(term, model, grouped_values, folder):
         engine = await _get_engine()
 
         def merge_rows(d1, d2, good_fields, bad_fields=[]):
-            return {**d1, **d2}
+            merged = {}
+            for k, v in d1.items():
+                if k in d2:
+                    if k in good_fields:
+                        merged[k] = int(d1.get(k, 0) or 0) + int(d2.get(k, 0) or 0)
+            return merged
 
         async with engine.acquire() as conn:
             for key, aggregated_values in grouped_values.items():
                 aggregated_values["ip"] = folder
-
-                q_ = hasattr(model.c, key)
-                result = None
+                q_ = getattr(model.c, term)
                 result = await conn.execute(select(model.c).where(q_ == key))
                 result = [r for r in result]
                 if result:
                     try:
-                        val = merge_rows(aggregated_values, result[0])
+                        good_fields = ["total_ingress", "valid_ingress", "code_200", "code_404", "code_503", "code_486", "code_487", "code_402", "code_404", "code_other_4xx", "code_other_5xx", \
+                                       "num_call_ringtone", "duration", "non_zero_call"]
+                        
+                        val = merge_rows(aggregated_values, result[0], good_fields=good_fields)
                         await conn.execute(model.update().where(q_ == key)
                                                          .values(**val))
                     except Exception as e:
-
                         logger.exception(e)
                         logger.error(val)
                 else:
                     try:
-
                         await conn.execute(model.insert().values(**aggregated_values))
                     except Exception as e:
                         logger.exception(e)
@@ -229,7 +233,7 @@ async def upsert(model, grouped_values, folder):
 
 STATUSES = ("200", "404", "503", "486", "487", "402", "480")
 def status_code(frame):
-    status = frame.pop("status", None)
+    status = frame.get("status", None)
 
     if not status:
         return
@@ -276,7 +280,7 @@ async def add_dnis_statistics(frames, folder=None):
     """
     logger.info("add dnis statistics for %d frames" % len(frames))
     dnis_exclude = ("call_id", "lrn_dnis", "status", "is_final", "ani", "failed", "busy", "ring_time")
-    return await upsert(DnisStatistics, group_by("dnis", frames, dnis_exclude), folder)
+    return await upsert("dnis", DnisStatistics, group_by("dnis", frames, dnis_exclude), folder)
 
 
 async def add_ani_statistics(frames, folder=None):
@@ -286,7 +290,7 @@ async def add_ani_statistics(frames, folder=None):
 
     logger.info("add ani statistics for %d frames" % len(frames))
     ani_exclude = ("call_id", "lrn_dnis", "status", "is_final", "dnis", "failed", "busy", "ring_time")
-    return await upsert(AniStatistics, group_by("ani", frames, ani_exclude), folder)
+    return await upsert("ani", AniStatistics, group_by("ani", frames, ani_exclude), folder)
 
 
 async def add_calls(frames):
@@ -382,20 +386,24 @@ async def get_file(host):
             frame = await create_row(frame, folder)
 
     logger.info("search on host: %s" % host)
+
     yesterday_template = (datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
+
     for filename, ip_folder in scp_target_file(host, yesterday_template):
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
+
         logger.info("got file: {}".format(file_path))
+
         for frame in process_file(file_path, ip_folder):
-            frame = await create_row(frame, folder)
+            frame = await create_row(frame, ip_folder)
         try:
             if os.path.isfile(file_path):
                 os.unlink(file_path)
         except Exception as e:
             print(e)
-        return frames
 
+        return frame
 
 
 def enable_process(host):
