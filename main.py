@@ -8,6 +8,8 @@ import settings
 
 import logging
 
+import argparse
+
 from aiopg.sa import create_engine
 
 from datetime import datetime, timedelta, timezone
@@ -41,24 +43,26 @@ def scp_target_file(host, template=None):
     ssh.connect(host,
                 username=settings.USERNAME,
                 password=settings.PASSWORD)
-    raw_cmd = 'find {} -name "2016-07-26.tar.bz2" -o -name "*.log"'.format(settings.CDR_SOURCE_FOLDER)
+    logger.info("search {} for {} template".format(host, template))
+    raw_cmd = 'find {} -name "{}.tar.bz2" -o -name "*.log"'.format(settings.CDR_SOURCE_FOLDER, template)
+
     stdin, stdout, stderr = ssh.exec_command(raw_cmd)
     file_list = stdout.read().splitlines()
-
+    logger.info("found total: {} files".format(len(file_list)))
+    logger.info("found: {}".format(file_list))
     ftp = ssh.open_sftp()
     filenames = []
     for index, f_ in enumerate(file_list):
         dir_path, filename = os.path.split(f_)
         dir_path = dir_path.decode("utf-8").replace(settings.CDR_SOURCE_FOLDER, "")
         dir_path = dir_path.split(os.sep)[1]
-        print(dir_path)
         filename = filename.decode("utf-8")
         logger.info("find file %s" % filename)
         f_name = "{}_{}".format(index, filename)
         ftp.get(f_.decode("utf-8"),
                 os.path.join(settings.LOCAL_FILE_FOLDER,
                 f_name))
-        yield f_name, dir_path
+        yield f_name, dir_path, filename
 
 
 def _extract_data(f):
@@ -176,11 +180,12 @@ def process_file(filename, folder=None):
         yield frames
 
 
-async def create_row(frames, folder=None):
+async def create_row(frames, folder=None, raw_filename=datetime.now().strftime("%Y-%m-%d")):
     try:
-        await add_dnis_statistics(frames, folder)
-        await add_ani_statistics(frames, folder)
 
+        raw_date = raw_filename.split(".")[0]
+        await add_dnis_statistics(frames, folder, raw_date)
+        await add_ani_statistics(frames, folder, raw_date)
 
         #grouped_dnis = await add_dnis(frames)
         #await add_calls(frames)
@@ -195,7 +200,7 @@ async def _get_engine():
     return engine
 
 
-async def upsert(term, model, grouped_values, folder):
+async def upsert(term, model, grouped_values, folder, raw_date):
         engine = await _get_engine()
 
         def merge_rows(d1, d2, good_fields, bad_fields=[]):
@@ -209,14 +214,17 @@ async def upsert(term, model, grouped_values, folder):
         async with engine.acquire() as conn:
             for key, aggregated_values in grouped_values.items():
                 aggregated_values["ip"] = folder
+                aggregated_values["date"] = raw_date
                 q_ = getattr(model.c, term)
-                result = await conn.execute(select(model.c).where(q_ == key))
+                result = await conn.execute(select(model.c).where(and_(q_ == key, model.c.date == raw_date)))
                 result = [r for r in result]
                 if result:
                     try:
-                        good_fields = ["total_ingress", "valid_ingress", "code_200", "code_404", "code_503", "code_486", "code_487", "code_402", "code_404", "code_other_4xx", "code_other_5xx", \
+                        good_fields = ["total_ingress", "valid_ingress", "code_200", "code_404",
+                                       "code_503", "code_486", "code_487", "code_402", "code_404",
+                                       "code_other_4xx", "code_other_5xx",
                                        "num_call_ringtone", "duration", "non_zero_call"]
-                        
+
                         val = merge_rows(aggregated_values, result[0], good_fields=good_fields)
                         await conn.execute(model.update().where(q_ == key)
                                                          .values(**val))
@@ -274,23 +282,23 @@ def group_by(term, frames, exclude_list=[]):
     return grouped_by_key
 
 
-async def add_dnis_statistics(frames, folder=None):
+async def add_dnis_statistics(frames, folder=None, raw_date=None):
     """
     adds/updates statistics and counts statuses
     """
     logger.info("add dnis statistics for %d frames" % len(frames))
     dnis_exclude = ("call_id", "lrn_dnis", "status", "is_final", "ani", "failed", "busy", "ring_time")
-    return await upsert("dnis", DnisStatistics, group_by("dnis", frames, dnis_exclude), folder)
+    return await upsert("dnis", DnisStatistics, group_by("dnis", frames, dnis_exclude), folder, raw_date)
 
 
-async def add_ani_statistics(frames, folder=None):
+async def add_ani_statistics(frames, folder=None, raw_date=None):
     """
     add statistics for ani
     """
 
     logger.info("add ani statistics for %d frames" % len(frames))
     ani_exclude = ("call_id", "lrn_dnis", "status", "is_final", "dnis", "failed", "busy", "ring_time")
-    return await upsert("ani", AniStatistics, group_by("ani", frames, ani_exclude), folder)
+    return await upsert("ani", AniStatistics, group_by("ani", frames, ani_exclude), folder, raw_date)
 
 
 async def add_calls(frames):
@@ -379,24 +387,29 @@ async def add_dnis(frames):
         return dnis
 
 async def get_file(host):
+
     if settings.DEBUG:
         folder = "localhost"
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, "0_2016-07-26.tar.bz2")
         for frame in process_file(file_path, folder):
-            frame = await create_row(frame, folder)
+            frame = await create_row(frame, folder, "2016-07-26")
 
+    parser = argparse.ArgumentParser(description="add date")
+    parser.add_argument("--date", help="add required date")
+    options = parser.parse_args()
+
+    search_date = options.date or datetime.now().strftime("%Y-%m-%d")
+
+    logger.info("got {} from input".format(search_date))
     logger.info("search on host: %s" % host)
 
-    yesterday_template = (datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
-
-    for filename, ip_folder in scp_target_file(host, yesterday_template):
+    for filename, ip_folder, raw_filename in scp_target_file(host, search_date):
         file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
-        file_path = os.path.join(settings.LOCAL_FILE_FOLDER, filename)
-
-        logger.info("got file: {}".format(file_path))
+        logger.info("got file: {} from {}".format(file_path, ip_folder))
 
         for frame in process_file(file_path, ip_folder):
-            frame = await create_row(frame, ip_folder)
+            pass
+            frame = await create_row(frame, ip_folder, raw_filename)
         try:
             if os.path.isfile(file_path):
                 os.unlink(file_path)
