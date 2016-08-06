@@ -1,7 +1,7 @@
 import os
 from os.path import abspath, dirname, join
 
-DEBUG = False
+DEBUG = True
 
 PORT = "9090"
 
@@ -23,6 +23,7 @@ if DEBUG:
 BAD_NUMBER_THRESHOLD = 50
 
 UNBLOCK_CODES = ["200", "486"]  # have to be str
+
 UNBLOCK_RING_TIME = 0
 UNBLOCK_DAY_RANGE = 10  # unblock when number is blocked over 10 days
 

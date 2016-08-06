@@ -84,60 +84,195 @@ class BadCallApiHandler(RequestHandler):
         if method:
             return await method(arguments)
 
+
+    async def base_get_entries(self, model, term, params):
+
+        engine = await self._get_engine()
+        async with engine.acquire() as conn:
+
+            start_time = params.get("start_time", None)
+            if not start_time:
+                start_time = datetime.utcnow().strftime("%Y-%m-%d")
+
+            end_time = params.get("end_time", None)
+            if not end_time:
+                end_time = datetime.utcnow().strftime("%Y-%m-%d")
+
+            query = select([getattr(model.c, term),])
+
+            if start_time and end_time:
+                query = query.where(and_(model.c.date >= start_time,
+                                         model.c.date <= end_time))
+
+            min_attempt = params.get("min_attempt", None)
+            if min_attempt:
+                query = query.where(model.c.total_ingress >= min_attempt)
+
+            min_succ_percent = params.get("min_success_percent", None)
+            if min_succ_percent:
+                query = query.where(model.c.valid_ingress/model.c.total_ingress*100 >= min_succ_percent)
+
+            max_succ_percent = params.get("max_success_percent", None)
+            if max_succ_percent:
+                query = query.where(model.c.valid_ingress/model.c.total_ingress*100 <= max_succ_percent)
+
+            code_200 = params.get("code_200", None)
+            if code_200:
+                query = query.where(model.c.code_200 / model.c.total_ingress*100 <= code_200)
+
+            ip = params.get("ip", None)
+            if ip:
+                query = query.where(model.c.ip == ip)
+
+            code_404 = params.get("code_404", None)
+            if code_404:
+                query = query.where(model.c.code_404 / model.c.total_ingress*100 >= code_404)
+
+            code_503 = params.get("code_503", None)
+            if code_503:
+                query = query.where(model.c.code_503 / model.c.total_ingress*100 >= code_503)
+
+            code_480 = params.get("code_480", None)
+            if code_480:
+                query = query.where(model.c.code_480 / model.c.total_ingress*100 >= code_480)
+
+            code_486 = params.get("code_486", None)
+            if code_486:
+                query = query.where(model.c.code_486 / model.c.total_ingress*100 >= code_486)
+
+            code_487 = params.get("code_487", None)
+            if code_487:
+                query = query.where(model.c.code_487 / model.c.total_ingress*100 >= code_487)
+
+            code_4xx = params.get("code_4xx", None)
+            if code_4xx:
+                query = query.where(model.c.code_4xx / model.c.total_ingress*100 >= code_4xx)
+
+            code_5xx = params.get("code_5xx", None)
+            if code_5xx:
+                query = query.where(model.c.code_5xx / model.c.total_ingress*100 >= code_5xx)
+
+            result = await conn.execute(query)
+            rows = [self.__parse_result_row(row) for row in await result.fetchall()]
+            return rows
+
+
+
+
     async def GetANI(self, params):
         """
         GetANI( start time, end time, min attempt, min_succ_percent, max_succ_percent)
         """
-        start_time = params.get("start_time", None)
-        if not start_time:
-            start_time = datetime.utcnow().strftime("%Y-%m-%d")
 
-        end_time = params.get("end_time", None)
-        if not end_time:
-            end_time = datetime.utcnow().strftime("%Y-%m-%d")
+        result = await self.base_get_entries(AniStatistics, "ani", params)
+        self.write(json.dumps(result))
 
-        min_attempt = params.get("min_attempt", None)
-        min_succ_percent = params.get("min_succ_percent", None)
-        max_succ_percent = params.get("max_succ_percent", None)
 
-        engine = await self._get_engine()
-        async with engine.acquire() as conn:
-            # no need to aggregate, because data is already aggregated
-            query = select(Calls.c)
 
-            if start_time:
-                query = query.where(Calls.c.time >= start_time)
 
-            if end_time:
-                query = query.where(Calls.c.time <= end_time)
+        # start_time = params.get("start_time", None)
+        # if not start_time:
+        #     start_time = datetime.utcnow().strftime("%Y-%m-%d")
 
-            if min_attempt:
-                query = query.where(Calls.c.num_valid_egress >= min_attempt)
+        # end_time = params.get("end_time", None)
+        # if not end_time:
+        #     end_time = datetime.utcnow().strftime("%Y-%m-%d")
 
-            #  TODO (aos): have to handler min/max succ percent
-            result = await conn.execute(query)
-            rows = [self.__parse_result_row(row) for row in await result.fetchall()]
-            grouped = self.__group_by_term("ani", rows)
-            self.write(json.dumps(grouped))
+        # min_attempt = params.get("min_attempt", None)
+        # min_succ_percent = params.get("min_success_percent", None)
+        # max_succ_percent = params.get("max_success_percent", None)
+
+        # engine = await self._get_engine()
+        # async with engine.acquire() as conn:
+        #     # no need to aggregate, because data is already aggregated
+        #     model = AniStatistics
+        #     query = select([model.c.ani,])
+
+        #     if start_time and end_time:
+        #         query = query.where(and_(model.c.date >= start_time,
+        #                                  model.c.date <= end_time))
+
+        #     if end_time:
+        #         query = query.where(model.c.date <= end_time)
+
+        #     if min_attempt:
+        #         query = query.where(model.c.total_ingress >= min_attempt)
+
+        #     if min_succ_percent:
+        #         query = query.where(model.c.valid_ingress/model.c.total_ingress*100 >= min_succ_percent)
+
+        #     if max_succ_percent:
+        #         query = query.where(model.c.valid_ingress/model.c.total_ingress*100 <= max_succ_percent)
+
+        #     #  TODO (aos): have to handler min/max succ percent
+        #     result = await conn.execute(query)
+        #     rows = [self.__parse_result_row(row) for row in await result.fetchall()]
+        #     #grouped = self.__group_by_term("ani", rows)
+        #     self.write(json.dumps(rows))
 
     async def GetDNIS(self, params):
-        engine = await self._get_engine()
-        with engine.acquire() as conn:
-            pass
+        result = await self.base_get_entries(DnisStatistics, "dnis", params)
+        self.write(json.dumps(result))
+
+        # start_time = params.get("start_time", None)
+        # if not start_time:
+        #     start_time = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # end_time = params.get("end_time", None)
+        # if not end_time:
+        #     end_time = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # min_attempt = params.get("min_attempt", None)
+        # min_succ_percent = params.get("min_success_percent", None)
+        # max_succ_percent = params.get("max_success_percent", None)
+
+        # engine = await self._get_engine()
+        # async with engine.acquire() as conn:
+        #     # no need to aggregate, because data is already aggregated
+        #     model = DnisStatistics
+        #     query = select([model.c.ani,])
+
+        #     if start_time and end_time:
+        #         query = query.where(and_(model.c.date >= start_time,
+        #                                  model.c.date <= end_time))
+
+        #     if end_time:
+        #         query = query.where(model.c.date <= end_time)
+
+        #     if min_attempt:
+        #         query = query.where(model.c.total_ingress >= min_attempt)
+
+        #     if min_succ_percent:
+        #         query = query.where(model.c.valid_ingress/model.c.total_ingress*100 >= min_succ_percent)
+
+        #     if max_succ_percent:
+        #         query = query.where(model.c.valid_ingress/model.c.total_ingress*100 <= max_succ_percent)
+
+        #     #  TODO (aos): have to handler min/max succ percent
+        #     result = await conn.execute(query)
+        #     rows = [self.__parse_result_row(row) for row in await result.fetchall()]
+        #     #grouped = self.__group_by_term("ani", rows)
+        #     self.write(json.dumps(rows))
+
 
     async def _get_potential_bad(self, params, term):
         date = params.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
-        date_start = date + ' 00:00:00'
-        date_end = date + ' 23:59:59'
         engine = await self._get_engine()
+
         async with engine.acquire() as conn:
-            fields = (Calls.c.ani, Calls.c. dnis, Calls.c.non_zero, Calls.c.duration, Calls.c.busy, Calls.c.ring_time, Calls.c.failed)
-            result = await conn.execute(select(fields).where(and_(Calls.c.time >= date_start,
-                                                                  Calls.c.time <= date_end)))
+
+            model = DnisStatistics
+            if term == "ani":
+                model = AniStatistics
+
+            fields = (getattr(model.c, term),)
+            q_ = and_(and_(model.c.date == date, model.c.non_zero_call == 0), model.c.duration == 0)
+            result = await conn.execute(select(fields).where(q_))
+
             rows = [self.__parse_result_row(row) for row in await result.fetchall()]
-            grouped = self.__group_by_term(term, rows)
-            bad =  self.__check(grouped)
-            return bad
+            #  grouped = self.__group_by_term(term, rows)
+            #  bad =  self.__check(grouped)
+            return rows
 
     async def GetPotentialBadANI(self, params):
         result = await self._get_potential_bad(params, "ani")

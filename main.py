@@ -102,20 +102,22 @@ def _extract_multiple_data(line):
         "ring_time": line[52],
         "busy": True if "USER_BUSY" in line[-1] else False,
         "is_final": line[99],
-        "non_zero_call": 1 if int(line[50]) > 0 else 0
+        "non_zero_call": 1 if int(line[50]) > 0 else 0,
+        "termination_trunk_id": line[29],
     }
 
-    dump["total_ingress"] = 1 if bool(line[99]) else 0
-    dump["valid_ingress"] = 1 if bool(line[99]) and bool(line[68]) else 0
+    dump["total_ingress_ani"] = 1 if bool(line[99]) else 0
+    dump["valid_ingress_ani"] = 1 if bool(line[99]) and bool(line[29]) else 0
+
+    dump["total_ingress_dnis"] = 1 if bool(line[29]) else 0
+    dump["valid_ingress_dnis"] = 1 if bool(line[29]) and bool(line[10]) else 0
 
     if line[51] and int(line[51]) > 0:
         dump["num_call_ringtone"] = 1
     else:
         dump["num_call_ringtone"] = 0
 
-    dump['date'] = datetime.fromtimestamp(float(str(line[3][:10])),
-                                          timezone.utc)
-
+    #dump['last_date'] = datetime.fromtimestamp(float(str(line[3][:10])))
     return dump
 
 
@@ -126,13 +128,13 @@ def __group_by_term(term, calls):
     return res
 
 
-def __daterange(start_date, end_date):
-    for n in range(int ((end_date - start_date).days)):
-        yield start_date + relativedelta(n)
+# # def __daterange(start_date, end_date):
+# #     for n in range(int ((end_date - start_date).days)):
+# #         yield start_date + relativedelta(n)
 
 
-def __get_time_range(start_dt, end_dt):
-    return start_dt.hour, end_dt.hour,
+# # def __get_time_range(start_dt, end_dt):
+# #     return start_dt.hour, end_dt.hour,
 
 
 def __get_file_names(start_dt, end_dt=None):
@@ -166,6 +168,7 @@ def process_file(filename, folder=None):
         frames = []
         for line in lines:
             _line = _extract_multiple_data(line)
+            _line["time"] = "{}:{}".format(cur_file.split(".")[0][-4:-2], cur_file.split(".")[0][-2:])
             # call_info = {k:v for k,v in _line}
 
             def is_good_call(call):
@@ -180,16 +183,12 @@ def process_file(filename, folder=None):
         yield frames
 
 
-async def create_row(frames, folder=None, raw_filename=datetime.now().strftime("%Y-%m-%d")):
+async def create_row(frames, folder=None, raw_filename=None):
     try:
-
         raw_date = raw_filename.split(".")[0]
         await add_dnis_statistics(frames, folder, raw_date)
         await add_ani_statistics(frames, folder, raw_date)
-
-        #grouped_dnis = await add_dnis(frames)
-        #await add_calls(frames)
-        #return grouped_dnis
+        return raw_date
     except Exception as e:
         logger.exception(e)
         return []
@@ -215,8 +214,10 @@ async def upsert(term, model, grouped_values, folder, raw_date):
             for key, aggregated_values in grouped_values.items():
                 aggregated_values["ip"] = folder
                 aggregated_values["date"] = raw_date
+
                 q_ = getattr(model.c, term)
-                result = await conn.execute(select(model.c).where(and_(q_ == key, model.c.date == raw_date)))
+                search_q_ = and_(and_(q_ == key, model.c.date == raw_date), model.c.ip == folder)
+                result = await conn.execute(select(model.c).where(search_q_))
                 result = [r for r in result]
                 if result:
                     try:
@@ -226,7 +227,7 @@ async def upsert(term, model, grouped_values, folder, raw_date):
                                        "num_call_ringtone", "duration", "non_zero_call"]
 
                         val = merge_rows(aggregated_values, result[0], good_fields=good_fields)
-                        await conn.execute(model.update().where(q_ == key)
+                        await conn.execute(model.update().where(search_q_)
                                                          .values(**val))
                     except Exception as e:
                         logger.exception(e)
@@ -265,6 +266,24 @@ def group_by(term, frames, exclude_list=[]):
     for key, frameset in frames.items():
         result = {}
         for frame in frameset:
+
+            if term == "ani" and not frame["is_final"]:
+                continue
+            if term == "dnis" and not frame["termination_trunk_id"]:
+                continue
+
+            frame["total_ingress"] = frame.pop("total_ingress_{}".format(term), 0)
+            frame["valid_ingress"] = frame.pop("valid_ingress_{}".format(term), 0)
+
+            # if term == "ani":
+            #     del frame["total_ingress_dnis"]
+            #     del frame["valid_ingress_dnis"]
+
+            # if term == "dnis":
+            #     del frame["total_ingress_ani"]
+            #     del frame["valid_ingress_ani"]
+
+
             if not result:
                 result = {k: v for k, v in frame.items() if k not in exclude_list and k}
                 s_code = status_code(frame)
@@ -287,7 +306,9 @@ async def add_dnis_statistics(frames, folder=None, raw_date=None):
     adds/updates statistics and counts statuses
     """
     logger.info("add dnis statistics for %d frames" % len(frames))
-    dnis_exclude = ("call_id", "lrn_dnis", "status", "is_final", "ani", "failed", "busy", "ring_time")
+    dnis_exclude = ("call_id", "lrn_dnis", "status", "is_final", "ani", "failed", "busy", "ring_time",
+                    "valid_ingress_dnis", "total_ingress_dnis", "valid_ingress_ani", "total_ingress_ani",
+                    "termination_trunk_id")
     return await upsert("dnis", DnisStatistics, group_by("dnis", frames, dnis_exclude), folder, raw_date)
 
 
@@ -297,7 +318,9 @@ async def add_ani_statistics(frames, folder=None, raw_date=None):
     """
 
     logger.info("add ani statistics for %d frames" % len(frames))
-    ani_exclude = ("call_id", "lrn_dnis", "status", "is_final", "dnis", "failed", "busy", "ring_time")
+    ani_exclude = ("call_id", "lrn_dnis", "status", "is_final", "dnis", "failed", "busy", "ring_time",
+                   "valid_ingress_dnis", "total_ingress_dnis", "valid_ingress_ani", "total_ingress_ani",
+                   "termination_trunk_id")
     return await upsert("ani", AniStatistics, group_by("ani", frames, ani_exclude), folder, raw_date)
 
 
@@ -390,9 +413,9 @@ async def get_file(host):
 
     if settings.DEBUG:
         folder = "localhost"
-        file_path = os.path.join(settings.LOCAL_FILE_FOLDER, "0_2016-07-26.tar.bz2")
+        file_path = os.path.join(settings.LOCAL_FILE_FOLDER, "0_2016-07-24.tar.bz2")
         for frame in process_file(file_path, folder):
-            frame = await create_row(frame, folder, "2016-07-26")
+            frame = await create_row(frame, folder, "2016-07-24")
 
     parser = argparse.ArgumentParser(description="add date")
     parser.add_argument("--date", help="add required date")
@@ -408,15 +431,15 @@ async def get_file(host):
         logger.info("got file: {} from {}".format(file_path, ip_folder))
 
         for frame in process_file(file_path, ip_folder):
-            pass
             frame = await create_row(frame, ip_folder, raw_filename)
-        try:
-            if os.path.isfile(file_path):
-                os.unlink(file_path)
-        except Exception as e:
-            print(e)
 
-        return frame
+        # try:
+        #     if os.path.isfile(file_path):
+        #         os.unlink(file_path)
+        # except Exception as e:
+        #     print(e)
+
+    return "done"
 
 
 def enable_process(host):
